@@ -340,9 +340,9 @@ class FileRequirement(Requirement):
         # self.path is relative
         logger.warn(f"relocate , path={path}, backend.root={backend.root}")
         self.path = Path(os.path.relpath(path, backend.root))
-        #if path.is_absolute():
+        # if path.is_absolute():
         #    self.path = path.relative_to(backend.root)
-        #else:
+        # else:
         #    self.path = path
 
         logger.warn(f"self.path={self.path}")
