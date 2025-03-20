@@ -23,6 +23,7 @@ from pdm.models.backends import BuildBackend, get_relative_path
 from pdm.models.markers import Marker, get_marker
 from pdm.models.setup import Setup
 from pdm.models.specifiers import PySpecSet, fix_legacy_specifier, get_specifier
+from pdm.termui import logger
 from pdm.utils import (
     PACKAGING_22,
     add_ssh_scheme_to_git_uri,
@@ -278,6 +279,7 @@ class FileRequirement(Requirement):
                 # the metadata.
                 if match:
                     return match.group(1)
+        logger.warn("Unable to guess package name for '{self.url}'")
         return None
 
     @classmethod
@@ -310,11 +312,6 @@ class FileRequirement(Requirement):
             if not self.url and path.is_absolute():
                 self.url = path.as_uri() + fragments
                 self.path = path
-            # For relative path, we don't resolve URL now, so the path may still contain fragments,
-            # it will be handled in `relocate()` method.
-            result = Setup.from_directory(self.absolute_path)  # type: ignore[arg-type]
-            if result.name:
-                self.name = result.name
         else:
             url = url_without_fragments(self.url)
             relpath = get_relative_path(url)
@@ -326,21 +323,37 @@ class FileRequirement(Requirement):
             else:
                 self.path = Path(relpath)
 
-        if self.url:
+        if self.path:
+            # For relative path, we don't resolve URL now, so the path may still contain fragments,
+            # it will be handled in `relocate()` method.
+            result = Setup.from_directory(self.absolute_path)  # type: ignore[arg-type]
+            if result.name:
+                self.name = result.name
+        if not self.name and self.url:
             self._parse_name_from_url()
 
     def relocate(self, backend: BuildBackend) -> None:
         """Change the project root to the given path"""
         if self.path is None or self.path.is_absolute():
             return
-        # self.path is relative
         path, fragments = split_path_fragments(self.path)
+        # self.path is relative
+        logger.warn(f"relocate , path={path}, backend.root={backend.root}")
+        logger.warn(f"trying alternative {path.absolute().relative_to(backend.root)}")
         self.path = Path(os.path.relpath(path, backend.root))
+        # if path.is_absolute():
+        #    self.path = path.relative_to(backend.root)
+        # else:
+        #    self.path = path
+
+        logger.warn(f"self.path={self.path}")
         relpath = self.path.as_posix()
+        logger.warn(f"relpath = {relpath}")
         if relpath == ".":
             relpath = ""
         self.url = backend.relative_path_to_url(relpath) + fragments
         self._root = backend.root
+        logger.warn(f"self.url = {self.url} self._root={self._root}")
 
     @property
     def absolute_path(self) -> Path | None:
