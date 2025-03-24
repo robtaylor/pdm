@@ -233,24 +233,15 @@ def expand_env_vars(credential: str, quote: bool = False, env: Mapping[str, str]
 
     Neither $ENV_VAR and %ENV_VAR is supported.
     """
-    from pdm.termui import logger
-    
     if env is None:
         env = os.environ
-    
-    logger.debug(f"expand_env_vars: Input credential: {credential}")
 
     def replace_func(match: Match) -> str:
         var_name = match.group(1)
         value = env.get(var_name, match.group(0))
-        logger.debug(f"expand_env_vars: Found var {var_name}, value={value}")
-        result = parse.quote(value, "") if quote else value
-        return result
+        return parse.quote(value, "") if quote else value
 
-    result = re.sub(r"\$\{(.+?)\}", replace_func, credential)
-    if result != credential:
-        logger.debug(f"expand_env_vars: Result: {result}")
-    return result
+    return re.sub(r"\$\{(.+?)\}", replace_func, credential)
 
 
 def expand_env_vars_in_auth(url: str) -> str:
