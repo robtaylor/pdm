@@ -52,38 +52,20 @@ class SetuptoolsBackend(BuildBackend):
 
 class PDMBackend(BuildBackend):
     def expand_line(self, req: str, expand_env: bool = True) -> str:
-        from pdm.termui import logger
-        
         root_uri = self.root.as_uri()
-        logger.debug(f"expand_line: Original req: {req}")
-        logger.debug(f"expand_line: root_uri: {root_uri}")
-        logger.debug(f"expand_line: self.root: {self.root}")
-        
         line = req.replace("file:///${PROJECT_ROOT}", root_uri)
-        logger.debug(f"expand_line: After PROJECT_ROOT replacement: {line}")
 
         if expand_env:
-            before_expand = line
             line = expand_env_vars(line)
-            if before_expand != line:
-                logger.debug(f"expand_line: After env var expansion: {line}")
                 
         return line
 
     def relative_path_to_url(self, path: str) -> str:
-        from pdm.termui import logger
-        
-        logger.debug(f"relative_path_to_url: Input path: {path}, isabs={os.path.isabs(path)}")
-        
         if os.path.isabs(path):
-            uri = Path(path).as_uri()
-            logger.debug(f"relative_path_to_url: Absolute path URI: {uri}")
-            return uri
+            return Path(path).as_uri()
             
         quoted_path = urllib.parse.quote(path)
-        url = f"file:///${{PROJECT_ROOT}}/{quoted_path}"
-        logger.debug(f"relative_path_to_url: URL result: {url}")
-        return url
+        return f"file:///${{PROJECT_ROOT}}/{quoted_path}"
 
     @classmethod
     def build_system(cls) -> BuildSystem:
@@ -172,18 +154,8 @@ def get_backend_by_spec(spec: dict) -> type[BuildBackend]:
 
 
 def get_relative_path(url: str) -> str | None:
-    from pdm.termui import logger
-    
-    logger.debug(f"get_relative_path: Input URL: {url}")
-    
     if url.startswith("file:///${PROJECT_ROOT}"):
-        relpath = urllib.parse.unquote(url[len("file:///${PROJECT_ROOT}/") :])
-        logger.debug(f"get_relative_path: Extracted from PROJECT_ROOT URL: {relpath}")
-        return relpath
+        return urllib.parse.unquote(url[len("file:///${PROJECT_ROOT}/") :])
     if url.startswith("{root:uri}"):
-        relpath = urllib.parse.unquote(url[len("{root:uri}/") :])
-        logger.debug(f"get_relative_path: Extracted from root:uri URL: {relpath}")
-        return relpath
-        
-    logger.debug(f"get_relative_path: Not a relative path URL pattern: {url}")
+        return urllib.parse.unquote(url[len("{root:uri}/") :])
     return None
