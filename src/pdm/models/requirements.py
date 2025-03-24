@@ -8,7 +8,6 @@ import os
 import posixpath
 import re
 import secrets
-import sys
 import urllib.parse as urlparse
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence, TypeVar, cast
@@ -24,7 +23,6 @@ from pdm.models.backends import BuildBackend, get_relative_path
 from pdm.models.markers import Marker, get_marker
 from pdm.models.setup import Setup
 from pdm.models.specifiers import PySpecSet, fix_legacy_specifier, get_specifier
-from pdm.termui import logger
 from pdm.utils import (
     PACKAGING_22,
     add_ssh_scheme_to_git_uri,
@@ -254,28 +252,14 @@ class FileRequirement(Requirement):
         return (*super()._hash_key(), self.get_full_url(), self.editable)
 
     def guess_name(self) -> str | None:
+        from pdm.termui import logger
+        
         url = url_without_fragments(self.url)
         logger.debug(f"guess_name: URL without fragments: {url}")
         
-        # Use correct URL parsing for Windows paths
-        if sys.platform == "win32" and url.startswith("file:///"):
-            try:
-                # Get path from URL in Windows-compatible way
-                raw_path = url_to_path(url)
-                logger.debug(f"guess_name: Windows URL to path: {raw_path}")
-                filename = os.path.basename(raw_path).rsplit("@", 1)[0]
-                logger.debug(f"guess_name: Windows filename: {filename}")
-            except ValueError as e:
-                logger.debug(f"guess_name: Error converting Windows URL to path: {e}")
-                # Fall back to standard method
-                filename = os.path.basename(urlparse.unquote(url)).rsplit("@", 1)[0]
-                logger.debug(f"guess_name: Windows fallback filename: {filename}")
-        else:
-            # Standard non-Windows parsing
-            filename = os.path.basename(urlparse.unquote(url)).rsplit("@", 1)[0]
-            logger.debug(f"guess_name: Non-Windows filename: {filename}")
-            
-        # VCS handling
+        filename = os.path.basename(urlparse.unquote(url)).rsplit("@", 1)[0]
+        logger.debug(f"guess_name: Filename: {filename}")
+        
         if self.is_vcs:
             logger.debug(f"guess_name: VCS type: {getattr(self, 'vcs', None)}")
             if self.vcs == "git":  # type: ignore[attr-defined]
@@ -321,8 +305,8 @@ class FileRequirement(Requirement):
                     name = match.group(1)
                     logger.debug(f"guess_name: Egg info match name: {name}")
                     return name
-        
-        logger.warn(f"Unable to guess package name for '{self.url}'")
+                    
+        logger.debug(f"guess_name: Unable to determine name from: {filename}")
         return None
 
     @classmethod
@@ -350,30 +334,19 @@ class FileRequirement(Requirement):
         return result
 
     def _parse_url(self) -> None:
+        from pdm.termui import logger
+        
+        logger.debug(f"_parse_url: path={self.path}, url={self.url}")
+        
         if self.path:
             path, fragments = split_path_fragments(self.path)
+            logger.debug(f"_parse_url: Split path={path}, fragments={fragments}")
+            
             if not self.url and path.is_absolute():
                 self.url = path.as_uri() + fragments
                 self.path = path
                 logger.debug(f"_parse_url: Absolute path set URL to {self.url}")
-        else:
-            url = url_without_fragments(self.url)
-            logger.debug(f"_parse_url: Parsing URL {url}")
-            relpath = get_relative_path(url)
-            if relpath is None:
-                try:
-                    self.path = Path(url_to_path(url))
-                    logger.debug(f"_parse_url: URL to path conversion: {url} -> {self.path}")
-                except ValueError as e:
-                    logger.debug(f"_parse_url: Failed to convert URL to path: {url}, error: {e}")
-                    pass
-            else:
-                self.path = Path(relpath)
-                logger.debug(f"_parse_url: Relative path from URL: {url} -> {self.path}")
-
-        logger.debug(f"_parse_url: Final path: {self.path}, URL: {self.url}")
-
-        if self.path:
+                
             # For relative path, we don't resolve URL now, so the path may still contain fragments,
             # it will be handled in `relocate()` method.
             abs_path = self.absolute_path
@@ -382,79 +355,83 @@ class FileRequirement(Requirement):
             if result.name:
                 self.name = result.name
                 logger.debug(f"_parse_url: Setup name: {self.name}")
-        if not self.name and self.url:
+        else:
+            url = url_without_fragments(self.url)
+            logger.debug(f"_parse_url: Parsing URL {url}")
+            
+            relpath = get_relative_path(url)
+            logger.debug(f"_parse_url: Relative path from get_relative_path: {relpath}")
+            
+            if relpath is None:
+                try:
+                    self.path = Path(url_to_path(url))
+                    logger.debug(f"_parse_url: URL to path conversion: {url} -> {self.path}")
+                except ValueError as e:
+                    logger.debug(f"_parse_url: Failed to convert URL to path: {url}")
+                    pass
+            else:
+                self.path = Path(relpath)
+                logger.debug(f"_parse_url: Relative path from URL: {url} -> {self.path}")
+
+        logger.debug(f"_parse_url: Final path={self.path}, url={self.url}")
+        
+        if self.url:
             logger.debug(f"_parse_url: Parsing name from URL: {self.url}")
             self._parse_name_from_url()
 
     def relocate(self, backend: BuildBackend) -> None:
         """Change the project root to the given path"""
+        from pdm.termui import logger
+        
         if self.path is None:
-            logger.debug("relocate: Path is None, skipping relocation")
+            logger.debug(f"relocate: Path is None, skipping relocation")
             return
-
+            
         logger.debug(f"relocate: Initial path={self.path}, url={self.url}, backend.root={backend.root}")
+        
+        if self.path.is_absolute():
+            logger.debug(f"relocate: Path is absolute, skipping relocation")
+            return
+            
+        # self.path is relative
+        logger.debug(f"relocate: Path is relative")
         path, fragments = split_path_fragments(self.path)
         logger.debug(f"relocate: Split path={path}, fragments={fragments}")
-
-        # Skip relocation for absolute paths
-        if path.is_absolute():
-            logger.debug("relocate: Path is absolute")
-            self.path = path
-            # On Windows, use normalized absolute path
-            if sys.platform == "win32" and str(backend.root) not in str(path):
-                logger.debug("relocate: Windows path on different drive than backend root")
-                # Just use absolute path as-is for unrelated paths on Windows
-                relpath = self.path.as_posix()
-                if relpath == ".":
-                    relpath = ""
-                old_url = self.url
-                self.url = path.as_uri() + fragments
-                logger.debug(f"relocate: Updated URL on Windows: {old_url} -> {self.url}")
-            else:
-                logger.debug("relocate: Path is related to backend root or not on Windows")
-                # Normal case for Unix or related Windows paths
-                relpath = self.path.as_posix()
-                if relpath == ".":
-                    relpath = ""
-                old_url = self.url
-                self.url = backend.relative_path_to_url(relpath) + fragments
-                logger.debug(f"relocate: Updated URL from backend: {old_url} -> {self.url}")
-            self._root = backend.root
-            logger.debug(f"relocate: Final for absolute path: path={self.path}, url={self.url}")
-            return
-
-        logger.debug("relocate: Path is relative")
-        # Handle path relocation for relative paths
+        
         try:
-            # Try using os.path.relpath which handles more cases
             relpath_str = os.path.relpath(path, backend.root)
             logger.debug(f"relocate: Relative path computation: {path} relative to {backend.root} = {relpath_str}")
             self.path = Path(relpath_str)
         except (ValueError, OSError) as e:
-            # Fall back to original behavior on error
             logger.debug(f"relocate: Error computing relative path: {e}, keeping original path")
             self.path = path
-
+            
         relpath = self.path.as_posix()
         if relpath == ".":
             relpath = ""
+            
         old_url = self.url
         self.url = backend.relative_path_to_url(relpath) + fragments
-        logger.debug(f"relocate: Updated URL for relative path: {old_url} -> {self.url}")
+        logger.debug(f"relocate: Updated URL: {old_url} -> {self.url}")
+        
         self._root = backend.root
-        logger.debug(f"relocate: Final for relative path: path={self.path}, url={self.url}")
+        logger.debug(f"relocate: Final path={self.path}, url={self.url}")
 
     @property
     def absolute_path(self) -> Path | None:
-        # Handle both absolute and relative paths correctly
+        from pdm.termui import logger
+        
         if self.path is None:
+            logger.debug(f"absolute_path: Path is None")
             return None
-
+            
         if self.path.is_absolute():
-            logger.debug(f"absolute_path: self.path is absolute, returning {self.path}")
+            logger.debug(f"absolute_path: Path is already absolute: {self.path}")
             return self.path
-        logger.debug(f"absolute_path: self.path is relative joining {self._root} with {self.path}")
-        return self._root.joinpath(self.path)
+            
+        result = self._root.joinpath(self.path)
+        logger.debug(f"absolute_path: Joined with root: {self._root} + {self.path} = {result}")
+        return result
 
     @property
     def is_local(self) -> bool:
@@ -496,6 +473,8 @@ class FileRequirement(Requirement):
         return f"{project_name}{extras}{delimiter}{url}{fragment_str}{marker}"
 
     def _parse_name_from_url(self) -> None:
+        from pdm.termui import logger
+        
         logger.debug(f"_parse_name_from_url: URL: {self.url}")
         parsed = urlparse.urlparse(self.url)
         logger.debug(f"_parse_name_from_url: Parsed URL: scheme={parsed.scheme}, netloc={parsed.netloc}, path={parsed.path}, fragment={parsed.fragment}")
@@ -517,6 +496,8 @@ class FileRequirement(Requirement):
             self.name = name
 
     def check_installable(self) -> None:
+        from pdm.termui import logger
+        
         logger.debug(f"check_installable: Starting check for {self.url}")
         abs_path = self.absolute_path
         if abs_path:
