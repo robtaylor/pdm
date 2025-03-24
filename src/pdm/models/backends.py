@@ -52,7 +52,8 @@ class SetuptoolsBackend(BuildBackend):
 
 
 class PDMBackend(BuildBackend):
-    def expand_line(self, req: str, expand_env: bool = True) -> str:
+    def expand_line(self, line: str, expand_env: bool = True) -> str:
+        req = line
         line = req.replace("file:///${PROJECT_ROOT}", self.root.as_uri())
 
         root_uri = self.root.as_uri()
@@ -158,10 +159,13 @@ def get_backend_by_spec(spec: dict) -> type[BuildBackend]:
     The parameter passed in is the 'build-system' section in pyproject.toml.
     """
     if "build-backend" not in spec:
+        logger.debug(f"get_backend_by_spec returning {DEFAULT_BACKEND}")
         return DEFAULT_BACKEND
     for backend_cls in _BACKENDS.values():
         if backend_cls.build_system()["build-backend"] == spec["build-backend"]:
+            logger.debug(f"get_backend_by_spec returning {backend_cls}")
             return backend_cls
+    logger.debug(f"get_backend_by_spec fell through to return {DEFAULT_BACKEND}")
     return DEFAULT_BACKEND
 
 

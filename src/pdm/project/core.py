@@ -42,6 +42,7 @@ from pdm.utils import (
     is_path_relative_to,
     normalize_name,
 )
+from pdm.termui import logger
 
 if TYPE_CHECKING:
     from findpython import Finder
@@ -95,6 +96,7 @@ class Project:
 
         if root_path is None:
             root_path = find_project_root() if not is_global else global_project
+            logger.debug(f"root_path unset. found {root_path}")
         if (
             not is_global
             and root_path is None
@@ -107,6 +109,7 @@ class Project:
                 self.core.ui.info("Project is not found, fallback to the global project")
 
         self.root: Path = Path(root_path or "").absolute()
+        logger.debug(f"setting self.root to {self.root}")
         self.is_global = is_global
         self.enable_write_lockfile = os.getenv("PDM_FROZEN_LOCKFILE", os.getenv("PDM_NO_LOCK", "0")).lower() not in (
             "1",
@@ -748,6 +751,7 @@ class Project:
 
     @property
     def backend(self) -> BuildBackend:
+        logger.debug(f"getting backend by spec {self.pyproject.build_system} root={self.root}")
         return get_backend_by_spec(self.pyproject.build_system)(self.root)
 
     def cache(self, name: str) -> Path:
