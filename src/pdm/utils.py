@@ -234,10 +234,10 @@ def expand_env_vars(credential: str, quote: bool = False, env: Mapping[str, str]
     Neither $ENV_VAR and %ENV_VAR is supported.
     """
     from pdm.termui import logger
-
+    
     if env is None:
         env = os.environ
-
+    
     logger.debug(f"expand_env_vars: Input credential: {credential}")
 
     def replace_func(match: Match) -> str:
@@ -255,32 +255,12 @@ def expand_env_vars(credential: str, quote: bool = False, env: Mapping[str, str]
 
 def expand_env_vars_in_auth(url: str) -> str:
     """In-place expand the auth in url"""
-    from pdm.termui import logger
-
-    logger.debug(f"expand_env_vars_in_auth: Input URL: {url}")
-
     scheme, netloc, path, params, query, fragment = parse.urlparse(url)
-
-    # Special handling for PROJECT_ROOT in the URL path on Windows
-    if "PROJECT_ROOT" in path and sys.platform == "win32":
-        logger.debug(f"expand_env_vars_in_auth: Found PROJECT_ROOT in path: {path}")
-        project_root = os.environ.get("PDM_PROJECT_ROOT", "")
-        if project_root:
-            # Replace ${PROJECT_ROOT} in path with actual project root
-            path = path.replace("${PROJECT_ROOT}", project_root)
-            logger.debug(f"expand_env_vars_in_auth: Path after PROJECT_ROOT replacement: {path}")
-
-    # Standard auth handling
     if "@" in netloc:
         auth, rest = netloc.split("@", 1)
         auth = expand_env_vars(auth, True)
         netloc = "@".join([auth, rest])
-
-    result = parse.urlunparse((scheme, netloc, path, params, query, fragment))
-    if result != url:
-        logger.debug(f"expand_env_vars_in_auth: Result URL: {result}")
-
-    return result
+    return parse.urlunparse((scheme, netloc, path, params, query, fragment))
 
 
 @functools.lru_cache
