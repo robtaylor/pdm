@@ -6,6 +6,8 @@ import logging
 import os
 import tempfile
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import rich
@@ -13,13 +15,14 @@ from rich.box import ROUNDED
 from rich.console import Console
 from rich.progress import Progress, ProgressColumn
 from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.status import Status
 from rich.table import Table
 from rich.theme import Theme
 
 from pdm.exceptions import PDMWarning
 
 if TYPE_CHECKING:
-    from typing import Any, Iterator, Sequence
+    from typing import Any, Iterator, Sequence, Generator
 
     from pdm._types import RichProtocol, Spinner, SpinnerT
 
@@ -167,6 +170,7 @@ class UI:
         self.verbosity = verbosity
         self.exit_stack = exit_stack or contextlib.ExitStack()
         self.log_dir: str | None = None
+        self._status = None
 
     def set_verbosity(self, verbosity: int) -> None:
         self.verbosity = Verbosity(verbosity)
@@ -274,12 +278,25 @@ class UI:
             unearth_logger.removeHandler(handler)
             handler.close()
 
-    def open_spinner(self, title: str) -> Spinner:
+    @contextmanager
+    def open_spinner(self, title: str) -> Iterator[DummySpinner] | Iterator[Status]:
         """Open a spinner as a context manager."""
         if self.verbosity >= Verbosity.DETAIL or not is_interactive():
-            return DummySpinner(title)
+            with DummySpinner(title) as dummy:
+                yield dummy
+        elif self._status:
+            old_status = self._status.status
+            self._status.update(title)
+            try:
+                yield self._status
+            finally:
+                self._status.update(old_status)
+                return self._status
         else:
-            return _err_console.status(title, spinner=SPINNER, spinner_style="primary")
+            self._status = _err_console.status(title, spinner=SPINNER, spinner_style="primary")
+            with self._status as status:
+                yield status
+            self._status = None
 
     def make_progress(self, *columns: str | ProgressColumn, **kwargs: Any) -> Progress:
         """create a progress instance for indented spinners"""
